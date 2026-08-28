@@ -45,3 +45,17 @@ def page_rows(rows: pd.DataFrame, *, page: int, page_size: int) -> dict:
         "items": rows.iloc[start:start + page_size].where(rows.notna(), None).to_dict(orient="records"),
         "total": int(total), "page": page, "page_size": page_size,
     }
+
+
+def summarize_prediction_rows(rows: pd.DataFrame, *, model_id: str | None, site_no: str | None, mc: str | None) -> dict:
+    """Return a display summary using exactly the rows selected by result filters."""
+    return {
+        "filters": {"model_id": model_id, "site_no": site_no, "mc": mc},
+        "prediction_total": int(rows["pred_qty_int"].sum()),
+        "predicted_nonzero_book_count": int((rows["pred_qty_int"] > 0).sum()),
+        "mc_counts": {f"MC{level}": int((rows["pred_mc"] == f"MC{level}").sum()) for level in range(5)},
+        "predicted_20_plus_book_count": int((rows["pred_qty_int"] >= 20).sum()),
+        "store_count": int(rows["site_no"].nunique()),
+        "item_count": int(rows["item_id"].nunique()),
+        "row_count": int(len(rows)),
+    }

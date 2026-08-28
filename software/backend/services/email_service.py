@@ -67,14 +67,19 @@ class EmailService:
     def send_test_email(self, target_email: str) -> dict:
         return self._send(notification_type="TEST", target_email=target_email, subject="文轩集团图书销量预测系统：测试邮件", body="这是一封测试邮件。SMTP 配置与通知记录功能已被调用。")
 
-    def send_prediction_success(self, run: dict, target_email: str, model_id: str, include_excel_link: bool = True) -> dict:
+    def send_prediction_success(self, run: dict, target_email: str, model_id: str, include_excel_link: bool = True, *, site_no: str | None = None, mc: str | None = None) -> dict:
         artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
         summary = artifact["model_summaries"][model_id]
-        excel = f"{self.config.public_base_url}/api/predictions/{run['prediction_run_id']}/export-excel?model_id={model_id}"
+        filters = [f"model_id={model_id}"]
+        if site_no:
+            filters.append(f"site_no={site_no}")
+        if mc:
+            filters.append(f"mc={mc}")
+        excel = f"{self.config.public_base_url}/api/predictions/{run['prediction_run_id']}/export-excel?{'&'.join(filters)}"
         parquet = f"{self.config.public_base_url}/api/predictions/{run['prediction_run_id']}/download-parquet"
         body = "\n".join([
             "预测任务已完成。", f"prediction_run_id: {run['prediction_run_id']}", f"dataset_id: {run['dataset_id']}", f"model_id: {model_id}",
-            f"observation_month: {artifact['observation_month']}",
+            f"observation_month: {artifact['observation_month']}", f"筛选条件: {'；'.join(filters)}",
             f"预测总销量: {summary['prediction_total']}", f"有动销图书数: {summary['predicted_nonzero_book_count']}",
             f"MC3（5–19）图书数: {summary['mc_counts']['MC3']}", f"MC4（20+）图书数: {summary['mc_counts']['MC4']}",
             f"覆盖门店数: {summary['store_count']}", f"覆盖图书数: {summary['item_count']}",

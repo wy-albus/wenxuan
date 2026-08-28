@@ -13,7 +13,7 @@ from software.backend.services.job_service import JobService
 from software.backend.services.prediction_registry import PredictionRegistry
 from software.backend.services.prediction_service import PredictionService
 from software.backend.services.export_service import export_prediction_excel
-from software.backend.services.result_query_service import page_rows, read_result_rows
+from software.backend.services.result_query_service import page_rows, read_result_rows, summarize_prediction_rows
 from software.backend.services.email_service import EmailService
 
 
@@ -33,6 +33,7 @@ class PredictionNotificationRequest(BaseModel):
     include_excel_link: bool = True
     notification_type: str = "PREDICTION_SUCCESS"
     site_no: str | None = None
+    mc: str | None = Field(None, pattern="^MC[0-4]$")
 
 
 @router.post("", status_code=201)
@@ -87,9 +88,16 @@ def _completed_run(run_id: str) -> dict:
 
 
 @router.get("/{run_id}/summary")
-def get_summary(run_id: str) -> dict:
+def get_summary(
+    run_id: str,
+    model_id: str | None = None,
+    site_no: str | None = None,
+    mc: str | None = Query(None, pattern="^MC[0-4]$"),
+) -> dict:
     run = _completed_run(run_id)
-    return json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    rows = read_result_rows(run["prediction_dir"], model_id=model_id, site_no=site_no, mc=mc)
+    return {**artifact, "filtered_summary": summarize_prediction_rows(rows, model_id=model_id, site_no=site_no, mc=mc)}
 
 
 @router.post("/{run_id}/notify")
@@ -115,7 +123,7 @@ def notify_prediction(run_id: str, request: PredictionNotificationRequest) -> di
         return service.send_export_success(run, request.target_email, model_id=model_id, site_no=request.site_no, excel_path=str(excel_path))
     if request.notification_type != "PREDICTION_SUCCESS":
         raise HTTPException(status_code=422, detail="notification_type must be PREDICTION_SUCCESS or EXPORT_SUCCESS")
-    return service.send_prediction_success(run, request.target_email, model_id, request.include_excel_link)
+    return service.send_prediction_success(run, request.target_email, model_id, request.include_excel_link, site_no=request.site_no, mc=request.mc)
 
 
 @router.get("/{run_id}/results")

@@ -63,7 +63,9 @@ def export_prediction_excel(
         raise ValueError("Prediction detail exceeds Excel row limit; export by site_no or download Parquet instead")
     export_dir = runtime_root() / "exports" / run["prediction_run_id"]
     export_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"prediction_{run['prediction_run_id']}_{_safe_component(model_id, 'all')}_{_safe_component(site_no, 'all')}.xlsx"
+    site_component = f"site{_safe_component(site_no, 'all')}"
+    mc_component = f"_{_safe_component(mc, 'all')}" if mc else ""
+    filename = f"prediction_{run['prediction_run_id']}_{_safe_component(model_id, 'all')}_{site_component}{mc_component}.xlsx"
     output_path = export_dir / filename
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         _summary_rows(run, predictions).to_excel(writer, sheet_name="Summary", index=False)

@@ -26,8 +26,8 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
         features.update(metadata["feature_names"])
     row = {column: 0.0 for column in features}
     row.update({
-        "month": "2026-03", "site_no": "S1", "item_id": "BOOK-1", "future_qty_1m": 0.0,
-        "future_qty_2m": 0.0, "blt_site_no": "S1", "gds_ctgry_3_lvel": "unknown",
+        "month": "2026-03", "site_no": "8000", "item_id": "BOOK-1", "future_qty_1m": 0.0,
+        "future_qty_2m": 0.0, "blt_site_no": "8000", "gds_ctgry_3_lvel": "unknown",
         "gds_ctgry_4_lvel": "unknown", "gds_ctgry_5_lvel": "unknown", "book_name": "Smoke Book",
     })
     feature_path = tmp_path / "features.parquet"
@@ -49,6 +49,13 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
     assert Path(run["prediction_dir"], "predictions.parquet").is_file()
     summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/summary").json()
     assert set(summary["model_summaries"]) == {"E0", "E2", "E3"}
+    filtered_summary = client.get(
+        f"/api/predictions/{payload['prediction_run_id']}/summary?model_id=E2&site_no=8000&mc=MC0"
+    )
+    assert filtered_summary.status_code == 200, filtered_summary.text
+    assert filtered_summary.json()["filtered_summary"]["filters"] == {"model_id": "E2", "site_no": "8000", "mc": "MC0"}
+    assert filtered_summary.json()["filtered_summary"]["store_count"] == 1
+    assert set(filtered_summary.json()["filtered_summary"]["mc_counts"]) == {"MC0", "MC1", "MC2", "MC3", "MC4"}
     top_books = client.get(f"/api/predictions/{payload['prediction_run_id']}/results?kind=top_books").json()
     assert top_books["total"] == 3
     assert {row["model_id"] for row in top_books["items"]} == {"E0", "E2", "E3"}
@@ -56,18 +63,20 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
     assert downloaded.status_code == 200
 
     filtered = client.get(
-        f"/api/predictions/{payload['prediction_run_id']}/results?kind=predictions&model_id=E2&site_no=S1&mc=MC0&page=1&page_size=10"
+        f"/api/predictions/{payload['prediction_run_id']}/results?kind=predictions&model_id=E2&site_no=8000&mc=MC0&page=1&page_size=10"
     )
     assert filtered.status_code == 200, filtered.text
     assert filtered.json()["total"] == 1
     assert filtered.json()["items"][0]["model_id"] == "E2"
 
-    store_summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/store/S1/summary?model_id=E2")
+    store_summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/store/8000/summary?model_id=E2")
     assert store_summary.status_code == 200, store_summary.text
     assert store_summary.json()["prediction_total"] >= 0
 
-    exported = client.get(f"/api/predictions/{payload['prediction_run_id']}/export-excel?model_id=E2&site_no=S1")
+    exported = client.get(f"/api/predictions/{payload['prediction_run_id']}/export-excel?model_id=E2&site_no=8000&mc=MC0&include_predictions=true")
     assert exported.status_code == 200, exported.text
     assert exported.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert f"prediction_{payload['prediction_run_id']}_E2_site8000_MC0.xlsx" in exported.headers["content-disposition"]
     workbook = load_workbook(BytesIO(exported.content), read_only=True)
     assert {"Summary", "Store_Summary", "Top_Books", "Predictions", "Model_Info"}.issubset(workbook.sheetnames)
+    assert workbook["Predictions"].max_row == 2
