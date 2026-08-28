@@ -1,0 +1,16 @@
+classifier:
+  model_path: models/final/two_stage_classifier_active_store_1m.txt
+  best_iteration: 750
+models:
+  E0:
+    model_path: models/checkpoints/two_stage_optimization/train_valid_protocol/selected/E0_VALID_SELECTED.txt
+    best_iteration: 1964
+    description: 基础 Two-stage，对照模型
+  E2:
+    model_path: models/checkpoints/two_stage_optimization/train_valid_protocol/selected/E2_CROSS_STORE_VALID_SELECTED.txt
+    best_iteration: 2885
+    description: Cross-store 跨门店特征模型
+  E3:
+    model_path: models/checkpoints/two_stage_optimization/train_valid_protocol/selected/E3_DIFF_CROSS_STORE_VALID_SELECTED.txt
+    best_iteration: 4562
+    description: Diff + Cross-store 模型

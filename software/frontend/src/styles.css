@@ -1,0 +1,6 @@
+:root { font-family: Inter, "Microsoft YaHei", sans-serif; color: #1f2937; background: #f3f6fa; }
+body { margin: 0; min-width: 1080px; background: #f3f6fa; }
+.brand { color: #fff; font-size: 18px; font-weight: 600; padding: 20px 18px; letter-spacing: .3px; }
+.page-title { margin: 0 0 6px; font-size: 22px; font-weight: 600; }.page-note { color: #718096; margin-bottom: 20px; }
+.content { padding: 24px; min-height: calc(100vh - 64px); }.metric-card { min-height: 114px; }.feature-tags .ant-tag { margin-bottom: 4px; }
+.detail-list .ant-descriptions-item-label { width: 160px; color: #64748b; }.upload-dragger { margin-bottom: 20px; }

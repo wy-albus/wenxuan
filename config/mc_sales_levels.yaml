@@ -1,0 +1,34 @@
+version: active_store_v1
+business_status: provisional_current_project_definition
+quantity_rounding: floor_x_plus_0_5_after_non_negative_clip
+horizons:
+  1m:
+    quantity_basis: cumulative_1_month
+  2m:
+    quantity_basis: monthly_average_of_2_month_cumulative
+levels:
+  - code: 0
+    name: no_sales
+    label_zh: 无动销
+    min_qty: 0
+    max_qty_exclusive: 1
+  - code: 1
+    name: low
+    label_zh: 低动销
+    min_qty: 1
+    max_qty_exclusive: 2
+  - code: 2
+    name: normal
+    label_zh: 一般动销
+    min_qty: 2
+    max_qty_exclusive: 5
+  - code: 3
+    name: medium_high
+    label_zh: 较高动销
+    min_qty: 5
+    max_qty_exclusive: 20
+  - code: 4
+    name: high
+    label_zh: 高动销
+    min_qty: 20
+    max_qty_exclusive: null

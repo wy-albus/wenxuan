@@ -1,0 +1,52 @@
+core_fields:
+  - period
+  - sal_chnl
+  - bus_type
+  - sal_type
+  - lbus_type
+  - oln_or_ofln
+  - site_no
+  - blt_site_no
+  - gds_no
+  - isbn
+  - rtn_flag
+  - vend_no
+  - gds_ctgry_3_lvel
+  - gds_ctgry_4_lvel
+  - gds_ctgry_5_lvel
+  - price
+  - qty
+  - tlp
+  - tsp
+
+privacy_fields:
+  - cust_no
+  - cust_name
+  - clphn_no
+  - crd_no
+  - 2_lvel_cust_code
+
+date_fields:
+  - period
+
+numeric_fields:
+  - qty
+  - price
+  - tlp
+  - tsp
+
+online_values:
+  - oln
+  - online
+  - on
+  - 线上
+  - 網上
+  - 网上
+
+offline_values:
+  - ofln
+  - offline
+  - off
+  - 线下
+  - 門店
+  - 门店

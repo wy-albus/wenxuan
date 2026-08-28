@@ -1,0 +1,29 @@
+# Research artifacts and large source data
+data/
+models/
+*.parquet
+*.xlsx
+*.zip
+*.csv
+*.docx
+docs/superpowers/
+wenxuan_project_plan_for_codex.md
+
+# Software runtime and secrets
+software/runtime/
+logs/
+*.log
+software/backend/.env
+software/frontend/.env.local
+.env
+
+# Language/build artifacts
+**/__pycache__/
+*.py[cod]
+software/frontend/node_modules/
+software/frontend/dist/
+software/frontend/npm-*.log
+software/frontend/vite-smoke.log
+software/frontend/vite.config.js
+software/frontend/vite.config.d.ts
+*.tsbuildinfo

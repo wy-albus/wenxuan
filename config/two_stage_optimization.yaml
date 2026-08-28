@@ -1,0 +1,116 @@
+dataset: data/processed/model_dataset_monthly_active_store.parquet
+monthly_sales: data/processed/monthly_item_store_sales.parquet
+cross_store_table: data/interim/item_month_cross_store_features.parquet
+feature_config: config/model_features.yaml
+
+seed: 42
+time_base: 2023-01
+
+diff_features:
+  - qty_diff_current_lag1
+  - qty_diff_lag1_lag2
+  - log_qty_diff_current_lag1
+  - sales_days_diff_current_lag1
+  - qty_diff_recent3_previous3
+  - qty_diff_6m_history_available
+
+cross_store_features:
+  - xstore_qty_current
+  - xstore_positive_sites_current
+  - xstore_qty_per_positive_site_current
+  - xstore_qty_mean_last_3m
+  - xstore_qty_max_last_3m
+  - xstore_qty_diff_1m
+
+audit:
+  uniform_sample_rate: 0.02
+  constant_share_limit: 0.9999
+  correlation_limit: 0.98
+  top_decile_lift_minimum: 1.10
+  monthly_direction_share_minimum: 0.75
+
+folds:
+  - {name: q3_2024, train_end: 2024-06, valid_start: 2024-07, valid_end: 2024-09}
+  - {name: q4_2024, train_end: 2024-09, valid_start: 2024-10, valid_end: 2024-12}
+  - {name: q1_2025, train_end: 2024-12, valid_start: 2025-01, valid_end: 2025-03}
+  - {name: q2_2025, train_end: 2025-03, valid_start: 2025-04, valid_end: 2025-06}
+
+pilot_folds: [q4_2024, q2_2025]
+
+sampling_rates:
+  classifier_sale: {"0": 0.05, "1": 0.20, "2-5": 0.40, "5-20": 0.75, "20+": 1.0}
+  regressor: {"0": 0.0, "1": 0.20, "2-5": 0.40, "5-20": 0.75, "20+": 1.0}
+  classifier_5plus: {"0": 0.005, "1": 0.05, "2-5": 0.20, "5-20": 1.0, "20+": 1.0}
+  classifier_20plus: {"0": 0.0025, "1": 0.02, "2-5": 0.10, "5-20": 0.50, "20+": 1.0}
+  validation: {"0": 0.02, "1": 0.10, "2-5": 0.25, "5-20": 0.75, "20+": 1.0}
+
+lightgbm:
+  common:
+    learning_rate: 0.05
+    num_leaves: 63
+    max_depth: -1
+    min_data_in_leaf: 500
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l1: 0.1
+    lambda_l2: 1.0
+    max_bin: 127
+    seed: 42
+    verbosity: -1
+  regressor:
+    objective: tweedie
+    metric: tweedie
+    tweedie_variance_power: 1.4
+  classifier:
+    objective: binary
+    metric: binary_logloss
+  max_rounds: 1400
+  early_stopping_rounds: 150
+
+train_valid_protocol:
+  max_rounds: 2000
+  boundary_extension_rounds: 5000
+  coarse_step: 25
+  refinement_radius: 25
+  ranking_bins: 10000
+  reproducibility_smoke_rows: 100000
+  reproducibility_smoke_rounds: 25
+
+pilot_gates:
+  relative_ap_gain: 0.02
+  other_ap_max_decline: 0.01
+  head_wape_gain_pp: 0.50
+  head_recall_gain_pp: 1.00
+  nonzero_wape_max_worsening_pp: 0.50
+
+candidate_b:
+  medium_top_fractions: [0.0025, 0.005, 0.01, 0.02, 0.05]
+  high_top_fractions: [0.0005, 0.001, 0.0025, 0.005, 0.01]
+  multiplier_maximum: 1.5
+  gates:
+    twenty_plus_wape_gain_pp: 0.50
+    twenty_plus_recall_gain_pp: 1.00
+    five_nineteen_max_worsening_pp: 0.25
+    nonzero_max_worsening_pp: 0.50
+    zero_prediction_total_max_increase: 0.01
+    total_bias_max_worsening_pp: 2.00
+
+complete_valid_gates:
+  head_wape_gain_pp: 0.50
+  other_head_wape_max_worsening_pp: 0.25
+  head_recall_gain_pp: 1.00
+  other_head_recall_max_worsening_pp: 0.25
+  overall_wape_max_worsening_pp: 0.50
+  zero_prediction_total_max_increase: 0.01
+  zero_threshold_rate_max_increase_pp: 0.10
+  total_absolute_bias_max_worsening_pp: 2.00
+  mc_macro_f1_max_decline_pp: 0.10
+  monthly_improvement_minimum: 4
+
+outputs:
+  report: reports/two_stage_diff_cross_candidate_b_optimization.md
+  ablation: reports/two_stage_diff_cross_ablation.csv
+  cache_dir: data/cache/two_stage_optimization
+  checkpoint_dir: models/checkpoints/two_stage_optimization
+  log_dir: logs/lightgbm/two_stage_optimization

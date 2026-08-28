@@ -1,0 +1,11 @@
+app_name: Wenxuan Data Ingestion API
+runtime_root: software/runtime
+database_name: registry.sqlite3
+public_base_url: http://127.0.0.1:8000
+# Comma-separated GitHub Pages origins are configured at runtime with CORS_ORIGINS.
+smtp:
+  host: null
+  port: 587
+  user: null
+  from: null
+  use_tls: true

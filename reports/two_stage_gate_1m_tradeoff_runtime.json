@@ -1,0 +1,9 @@
+{
+  "valid_rows": 18563573,
+  "evaluation_seconds": 1546.884546100002,
+  "peak_ram_gib": 0.3392181396484375,
+  "classifier_iteration": 914,
+  "regressor_iteration": 790,
+  "threshold_count": 97,
+  "log_path": "logs\\lightgbm\\two_stage_gate_tradeoff_1m\\run_20260815_190817.log"
+}

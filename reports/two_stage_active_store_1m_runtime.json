@@ -1,0 +1,82 @@
+{
+  "feature_count": 57,
+  "train_rows": 4379008,
+  "valid_rows": 556913,
+  "positive_train_rows": 1827297,
+  "positive_valid_rows": 209368,
+  "sampling_seconds": 545.5626161000109,
+  "classifier_training_seconds": 386.0020397999906,
+  "regressor_training_seconds": 181.41043889999855,
+  "complete_valid_seconds": 5673.7875087999855,
+  "complete_valid_rows": 18563573,
+  "peak_ram_gib": 2.5670852661132812,
+  "total_seconds": 7130.067885700002,
+  "classifier_trained_iterations": 914,
+  "regressor_trained_iterations": 1054,
+  "classifier_selected_iteration": 750,
+  "regressor_selected_iteration": 1054,
+  "classifier_params": {
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "max_depth": -1,
+    "min_data_in_leaf": 500,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l1": 0.1,
+    "lambda_l2": 1.0,
+    "max_bin": 127,
+    "seed": 42,
+    "verbosity": -1,
+    "num_threads": 16,
+    "first_metric_only": true,
+    "objective": "binary",
+    "metric": "binary_logloss"
+  },
+  "regressor_params": {
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "max_depth": -1,
+    "min_data_in_leaf": 500,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l1": 0.1,
+    "lambda_l2": 1.0,
+    "max_bin": 127,
+    "seed": 42,
+    "verbosity": -1,
+    "num_threads": 16,
+    "first_metric_only": true,
+    "objective": "tweedie",
+    "metric": "tweedie",
+    "tweedie_variance_power": 1.4
+  },
+  "classifier_candidates": [
+    750,
+    850,
+    864,
+    914
+  ],
+  "regressor_candidates": [
+    650,
+    950,
+    954,
+    1054
+  ],
+  "complete_valid_pairs": [
+    [
+      750,
+      1054
+    ],
+    [
+      850,
+      1054
+    ],
+    [
+      864,
+      1054
+    ]
+  ],
+  "log_path": "logs\\lightgbm\\two_stage_active_store_1m\\run_20260816_155723.log"
+}

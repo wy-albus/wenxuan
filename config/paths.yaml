@@ -1,0 +1,14 @@
+raw_data_dir: data/raw
+interim_dir: data/interim
+processed_dir: data/processed
+outputs_dir: data/outputs
+reports_dir: reports
+
+data_quality_report: reports/data_quality_report.md
+cleaning_summary: reports/cleaning_summary.md
+long_tail_report: reports/long_tail_analysis.md
+
+daily_sales: data/processed/daily_item_store_sales.parquet
+monthly_sales: data/processed/monthly_item_store_sales.parquet
+model_dataset_monthly: data/processed/model_dataset_monthly.parquet
+model_dataset_report: reports/model_dataset_report.md

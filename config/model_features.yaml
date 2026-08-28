@@ -1,0 +1,352 @@
+dataset: data/processed/model_dataset_monthly.parquet
+
+excluded_from_all_features:
+  - future_qty_1m
+  - future_qty_2m
+  - future_has_sales_1m
+  - future_has_sales_2m
+  - split
+  - item_id
+  - isbn
+  - gds_no
+
+excluded_v1_anomalous_fields:
+  - unknown_channel_qty
+  - discount_rate
+  - discount_rate_last_3m
+  - discount_rate_last_6m
+  - offline_ratio_last_3m
+  - online_ratio_last_3m
+  - offline_ratio_last_6m
+  - online_ratio_last_6m
+
+target_fields:
+  regression:
+    - future_qty_1m
+    - future_qty_2m
+  classification:
+    - future_has_sales_1m
+    - future_has_sales_2m
+  runtime_non_negative:
+    - target_qty_1m
+    - target_qty_2m
+
+split_field: split
+
+categorical_features:
+  - site_no
+  - blt_site_no
+  - gds_ctgry_3_lvel
+  - gds_ctgry_4_lvel
+  - gds_ctgry_5_lvel
+
+runtime_time_features:
+  - year
+  - month_of_year
+  - quarter
+  - time_index
+  - future_1m_year
+  - future_1m_month_of_year
+  - future_1m_quarter
+  - future_1m_time_index
+  - future_2m_month_of_year
+  - future_2m_quarter
+  - future_2m_time_index
+
+time_feature_settings:
+  base_month: 2023-01
+
+lightgbm_horizon_features:
+  1m:
+    - future_1m_year
+    - future_1m_month_of_year
+    - future_1m_quarter
+    - future_1m_time_index
+  2m:
+    - future_1m_month_of_year
+    - future_1m_quarter
+    - future_1m_time_index
+    - future_2m_month_of_year
+    - future_2m_quarter
+    - future_2m_time_index
+
+random_forest_horizon_features:
+  1m:
+    - future_1m_year
+    - future_1m_month_of_year
+    - future_1m_quarter
+    - future_1m_time_index
+  2m:
+    - future_1m_month_of_year
+    - future_1m_quarter
+    - future_1m_time_index
+    - future_2m_month_of_year
+    - future_2m_quarter
+    - future_2m_time_index
+
+lightgbm_training:
+  sampling_rates:
+    "0": 0.05
+    "1": 0.20
+    "2-5": 0.40
+    "5-20": 0.75
+    "20+": 1.00
+  valid_sampling_rates:
+    "0": 0.02
+    "1": 0.10
+    "2-5": 0.25
+    "5-20": 0.75
+    "20+": 1.00
+  seed: 42
+  params:
+    objective: regression_l1
+    metric: l1
+    learning_rate: 0.05
+    num_leaves: 63
+    max_depth: -1
+    min_data_in_leaf: 500
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l1: 0.1
+    lambda_l2: 1.0
+    max_bin: 127
+    seed: 42
+    verbosity: -1
+  num_boost_round: 2000
+  early_stopping_rounds: 100
+
+baseline_settings:
+  historical_mean:
+    horizon_2_multiplier: 2.0
+  weighted_moving_average:
+    weights:
+      qty_lag_1m: 0.5
+      qty_lag_2m: 0.3
+      qty_lag_3m: 0.2
+    horizon_2_multiplier: 2.0
+
+historical_mean_features:
+  - qty_lag_1m
+  - qty_lag_2m
+  - qty_lag_3m
+  - qty_mean_last_3m
+  - qty_sum_last_3m
+
+weighted_moving_average_features:
+  - qty_lag_1m
+  - qty_lag_2m
+  - qty_lag_3m
+  - qty_mean_last_3m
+  - qty_sum_last_3m
+
+random_forest_features:
+  - price
+  - total_qty
+  - offline_qty
+  - online_qty
+  - total_tlp
+  - total_tsp
+  - avg_real_price
+  - sales_days
+  - sales_count
+  - return_count
+  - return_qty
+  - qty_lag_1m
+  - qty_lag_2m
+  - qty_lag_3m
+  - qty_lag_6m
+  - offline_qty_lag_1m
+  - online_qty_lag_1m
+  - qty_sum_last_3m
+  - qty_mean_last_3m
+  - qty_max_last_3m
+  - qty_std_last_3m
+  - qty_sum_last_6m
+  - qty_mean_last_6m
+  - qty_max_last_6m
+  - qty_std_last_6m
+  - offline_qty_sum_last_3m
+  - online_qty_sum_last_3m
+  - offline_qty_sum_last_6m
+  - online_qty_sum_last_6m
+  - sales_days_lag_1m
+  - sales_days_sum_last_3m
+  - sales_days_sum_last_6m
+  - active_months_last_3m
+  - active_months_last_6m
+  - zero_sales_months_last_3m
+  - zero_sales_months_last_6m
+  - is_sold_last_1m
+  - is_sold_last_3m
+  - is_sold_last_6m
+  - months_since_last_sale
+  - tsp_sum_last_3m
+  - tlp_sum_last_3m
+  - tsp_sum_last_6m
+  - tlp_sum_last_6m
+  - site_no
+  - blt_site_no
+  - gds_ctgry_3_lvel
+  - gds_ctgry_4_lvel
+  - gds_ctgry_5_lvel
+  - year
+  - month_of_year
+  - quarter
+  - time_index
+
+lightgbm_features:
+  - price
+  - total_qty
+  - offline_qty
+  - online_qty
+  - total_tlp
+  - total_tsp
+  - avg_real_price
+  - sales_days
+  - sales_count
+  - return_count
+  - return_qty
+  - qty_lag_1m
+  - qty_lag_2m
+  - qty_lag_3m
+  - qty_lag_6m
+  - offline_qty_lag_1m
+  - online_qty_lag_1m
+  - qty_sum_last_3m
+  - qty_mean_last_3m
+  - qty_max_last_3m
+  - qty_std_last_3m
+  - qty_sum_last_6m
+  - qty_mean_last_6m
+  - qty_max_last_6m
+  - qty_std_last_6m
+  - offline_qty_sum_last_3m
+  - online_qty_sum_last_3m
+  - offline_qty_sum_last_6m
+  - online_qty_sum_last_6m
+  - sales_days_lag_1m
+  - sales_days_sum_last_3m
+  - sales_days_sum_last_6m
+  - active_months_last_3m
+  - active_months_last_6m
+  - zero_sales_months_last_3m
+  - zero_sales_months_last_6m
+  - is_sold_last_1m
+  - is_sold_last_3m
+  - is_sold_last_6m
+  - months_since_last_sale
+  - tsp_sum_last_3m
+  - tlp_sum_last_3m
+  - tsp_sum_last_6m
+  - tlp_sum_last_6m
+  - site_no
+  - blt_site_no
+  - gds_ctgry_3_lvel
+  - gds_ctgry_4_lvel
+  - gds_ctgry_5_lvel
+  - year
+  - month_of_year
+  - quarter
+  - time_index
+
+mlp_features:
+  - price
+  - total_qty
+  - offline_qty
+  - online_qty
+  - total_tlp
+  - total_tsp
+  - avg_real_price
+  - sales_days
+  - sales_count
+  - return_count
+  - return_qty
+  - qty_lag_1m
+  - qty_lag_2m
+  - qty_lag_3m
+  - qty_lag_6m
+  - offline_qty_lag_1m
+  - online_qty_lag_1m
+  - qty_sum_last_3m
+  - qty_mean_last_3m
+  - qty_max_last_3m
+  - qty_std_last_3m
+  - qty_sum_last_6m
+  - qty_mean_last_6m
+  - qty_max_last_6m
+  - qty_std_last_6m
+  - offline_qty_sum_last_3m
+  - online_qty_sum_last_3m
+  - offline_qty_sum_last_6m
+  - online_qty_sum_last_6m
+  - sales_days_lag_1m
+  - sales_days_sum_last_3m
+  - sales_days_sum_last_6m
+  - active_months_last_3m
+  - active_months_last_6m
+  - zero_sales_months_last_3m
+  - zero_sales_months_last_6m
+  - is_sold_last_1m
+  - is_sold_last_3m
+  - is_sold_last_6m
+  - months_since_last_sale
+  - tsp_sum_last_3m
+  - tlp_sum_last_3m
+  - tsp_sum_last_6m
+  - tlp_sum_last_6m
+
+two_stage_features:
+  - price
+  - total_qty
+  - offline_qty
+  - online_qty
+  - total_tlp
+  - total_tsp
+  - avg_real_price
+  - sales_days
+  - sales_count
+  - return_count
+  - return_qty
+  - qty_lag_1m
+  - qty_lag_2m
+  - qty_lag_3m
+  - qty_lag_6m
+  - offline_qty_lag_1m
+  - online_qty_lag_1m
+  - qty_sum_last_3m
+  - qty_mean_last_3m
+  - qty_max_last_3m
+  - qty_std_last_3m
+  - qty_sum_last_6m
+  - qty_mean_last_6m
+  - qty_max_last_6m
+  - qty_std_last_6m
+  - offline_qty_sum_last_3m
+  - online_qty_sum_last_3m
+  - offline_qty_sum_last_6m
+  - online_qty_sum_last_6m
+  - sales_days_lag_1m
+  - sales_days_sum_last_3m
+  - sales_days_sum_last_6m
+  - active_months_last_3m
+  - active_months_last_6m
+  - zero_sales_months_last_3m
+  - zero_sales_months_last_6m
+  - is_sold_last_1m
+  - is_sold_last_3m
+  - is_sold_last_6m
+  - months_since_last_sale
+  - tsp_sum_last_3m
+  - tlp_sum_last_3m
+  - tsp_sum_last_6m
+  - tlp_sum_last_6m
+  - site_no
+  - blt_site_no
+  - gds_ctgry_3_lvel
+  - gds_ctgry_4_lvel
+  - gds_ctgry_5_lvel
+  - year
+  - month_of_year
+  - quarter
+  - time_index
