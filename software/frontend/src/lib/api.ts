@@ -18,6 +18,9 @@ export interface DifficultBooksPage { items: DifficultBookRow[]; total: number; 
 export interface DifficultBooksSummary { difficult_book_count: number; difficult_ratio: number; store_count: number; avg_abs_error: number | null; hard_count: number; field_schema: FieldSchema[]; difficulty_rules: DifficultyRules; }
 export interface HistoricalPoint { month: string; actual_qty: number | null; pred_qty: number | null; is_prediction: boolean; }
 export interface HistoricalSeries { prediction_run_id: string; model_id: string; site_no: string | null; item_id: string | null; items: HistoricalPoint[]; }
+export interface DataMonth { month: string; year: string; status: string; store_count: number; item_count: number; row_count: number; source_dataset_ids: string[]; }
+export interface DataMonthCatalog { items: DataMonth[]; summary: { month_count: number; store_count: number; item_count: number; date_range: { start: string; end: string } | null }; lineage: Record<string, unknown>; }
+export interface PredictionReadiness { status: 'READY' | 'NOT_READY'; target_month: string; observation_month: string; required_months?: string[]; missing_months?: string[]; affected_features?: string[]; contracts?: Record<string, unknown>[]; lineage?: Record<string, unknown>; detail?: string; }
 
 export const apiBaseUrl = () => (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -33,6 +36,7 @@ export const getJobs = () => request<{ items: Job[] }>('/api/jobs');
 export const getJob = (id: string) => request<Job>(`/api/jobs/${id}`);
 export const getUploads = () => request<{ items: UploadRecord[] }>('/api/uploads');
 export const getDatasets = () => request<{ items: Dataset[] }>('/api/datasets');
+export const getDataMonths = () => request<DataMonthCatalog>('/api/datasets/months');
 export const getDataset = (id: string) => request<Dataset>(`/api/datasets/${id}`);
 export async function uploadFile(file: File) { const form = new FormData(); form.append('file', file); return request<UploadResult>('/api/uploads', { method: 'POST', body: form }); }
 export function uploadFileWithProgress(file: File, onProgress: (progress: UploadProgress) => void): Promise<UploadResult> {
@@ -60,7 +64,8 @@ export function uploadFileWithProgress(file: File, onProgress: (progress: Upload
   });
 }
 export const processDataset = (upload_id: string, dataset_name: string, options: { processMode?: 'append' | 'create'; targetDatasetId?: string } = {}) => request<{ job_id: string; dataset_id: string }>('/api/datasets/process', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_id, dataset_name, process_mode: options.processMode ?? 'create', target_dataset_id: options.targetDatasetId }) });
-export const createPrediction = (payload: { dataset_id: string; model_ids: string[]; observation_month?: string; store_ids?: string[] }) => request<{ prediction_run_id: string; job_id: string; status: JobStatus }>('/api/predictions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+export const createPrediction = (payload: { dataset_id?: string; target_month?: string; model_ids: string[]; observation_month?: string; store_ids?: string[] }) => request<{ prediction_run_id: string; job_id: string; status: JobStatus }>('/api/predictions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+export const checkPredictionReadiness = (payload: { target_month: string; model_ids: string[] }) => request<PredictionReadiness>('/api/predictions/readiness', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 export const getPredictions = () => request<{ items: PredictionRun[] }>('/api/predictions');
 export const getPrediction = (runId: string) => request<PredictionRun>(`/api/predictions/${runId}`);
 export const getPredictionSummary = (runId: string, filters: Pick<ResultFilters, 'modelId' | 'siteNo' | 'mc'> = {}) => {
