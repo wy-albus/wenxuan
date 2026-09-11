@@ -114,8 +114,10 @@ def add_runtime_columns(df: pd.DataFrame, base_month: str = TIME_INDEX_BASE_MONT
     future_1m = month_period + 1
     future_2m = month_period + 2
     base_ordinal = pd.Period(base_month, freq="M").ordinal
-    df["target_qty_1m"] = np.maximum(pd.to_numeric(df["future_qty_1m"], errors="coerce"), 0)
-    df["target_qty_2m"] = np.maximum(pd.to_numeric(df["future_qty_2m"], errors="coerce"), 0)
+    if "future_qty_1m" in df.columns:
+        df["target_qty_1m"] = np.maximum(pd.to_numeric(df["future_qty_1m"], errors="coerce"), 0)
+    if "future_qty_2m" in df.columns:
+        df["target_qty_2m"] = np.maximum(pd.to_numeric(df["future_qty_2m"], errors="coerce"), 0)
     df["year"] = month_period.year.astype("int16")
     df["month_of_year"] = month_period.month.astype("int8")
     df["quarter"] = month_period.quarter.astype("int8")
