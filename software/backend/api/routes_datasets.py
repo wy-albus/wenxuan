@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from software.backend.services.data_processing_service import DataProcessingService
 from software.backend.services.dataset_registry import DatasetRegistry
 from software.backend.services.job_service import JobService
+from software.backend.services.monthly_data_service import MonthlyDataService
 from software.backend.services.upload_service import UploadService
 
 
@@ -45,6 +46,38 @@ def process_dataset(request: ProcessRequest) -> dict:
 @router.get("")
 def list_datasets() -> dict:
     return {"items": DatasetRegistry().list()}
+
+
+@router.get("/months")
+def list_data_months() -> dict:
+    monthly, lineage = MonthlyDataService().read_standard_history()
+    if monthly.empty:
+        return {"items": [], "summary": {"month_count": 0, "store_count": 0, "item_count": 0, "date_range": None}, "lineage": lineage}
+    grouped = []
+    for month, rows in monthly.groupby("month", sort=True):
+        sources = []
+        if "source_dataset_id" in rows.columns:
+            sources = sorted(rows["source_dataset_id"].dropna().astype(str).unique().tolist())
+        grouped.append({
+            "month": str(month),
+            "year": str(month)[:4],
+            "status": "READY",
+            "store_count": int(rows["site_no"].nunique()),
+            "item_count": int(rows["item_id"].nunique()),
+            "row_count": int(len(rows)),
+            "source_dataset_ids": sources,
+        })
+    months = [item["month"] for item in grouped]
+    return {
+        "items": grouped,
+        "summary": {
+            "month_count": len(grouped),
+            "store_count": int(monthly["site_no"].nunique()),
+            "item_count": int(monthly["item_id"].nunique()),
+            "date_range": {"start": months[0], "end": months[-1]} if months else None,
+        },
+        "lineage": lineage,
+    }
 
 
 @router.get("/{dataset_id}")
