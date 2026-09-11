@@ -4,14 +4,16 @@ import json
 import uuid
 from pathlib import Path
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from software.backend.services.dataset_registry import DatasetRegistry
+from software.backend.services.difficult_books_service import build_difficult_books, difficult_books_summary, export_difficult_books, page_difficult_books
 from software.backend.services.job_service import JobService
 from software.backend.services.prediction_registry import PredictionRegistry
-from software.backend.services.prediction_service import PredictionService
+from software.backend.services.prediction_service import PredictionService, target_month_for
 from software.backend.services.export_service import export_prediction_excel
 from software.backend.services.result_query_service import page_rows, read_result_rows, summarize_prediction_rows
 from software.backend.services.email_service import EmailService
@@ -96,6 +98,7 @@ def get_summary(
 ) -> dict:
     run = _completed_run(run_id)
     artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    artifact.setdefault("target_month", target_month_for(artifact.get("observation_month")))
     rows = read_result_rows(run["prediction_dir"], model_id=model_id, site_no=site_no, mc=mc)
     return {**artifact, "filtered_summary": summarize_prediction_rows(rows, model_id=model_id, site_no=site_no, mc=mc)}
 
@@ -135,13 +138,15 @@ def get_results(
     mc: str | None = Query(None, pattern="^MC[0-4]$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=1000),
+    sort_by: str = Query("pred_qty_int", pattern="^(pred_qty_int|p_sale|item_id)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> dict:
     run = _completed_run(run_id)
     try:
-        result = page_rows(read_result_rows(run["prediction_dir"], kind=kind, model_id=model_id, site_no=site_no, mc=mc), page=page, page_size=page_size)
+        result = page_rows(read_result_rows(run["prediction_dir"], kind=kind, model_id=model_id, site_no=site_no, mc=mc, sort_by=sort_by, sort_order=sort_order), page=page, page_size=page_size)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {**result, "kind": kind}
+    return {**result, "kind": kind, "sort": {"sort_by": sort_by, "sort_order": sort_order}}
 
 
 @router.get("/{run_id}/store/{site_no}/summary")
@@ -167,6 +172,111 @@ def get_store_summary(run_id: str, site_no: str, model_id: str | None = None) ->
 @router.get("/{run_id}/store/{site_no}/results")
 def get_store_results(run_id: str, site_no: str, model_id: str | None = None, mc: str | None = Query(None, pattern="^MC[0-4]$"), page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=1000)) -> dict:
     return get_results(run_id, kind="predictions", model_id=model_id, site_no=site_no, mc=mc, page=page, page_size=page_size)
+
+
+@router.get("/{run_id}/historical-series")
+def get_historical_series(
+    run_id: str,
+    model_id: str | None = None,
+    site_no: str | None = None,
+    item_id: str | None = None,
+) -> dict:
+    run = _completed_run(run_id)
+    dataset = DatasetRegistry().get(run["dataset_id"])
+    monthly_path = Path(dataset["monthly_parquet_path"])
+    if not monthly_path.is_file():
+        raise HTTPException(status_code=404, detail="Historical monthly sales file not found")
+    monthly = pd.read_parquet(monthly_path)
+    if "total_qty" not in monthly.columns:
+        raise HTTPException(status_code=422, detail="Historical monthly sales file has no total_qty column")
+    if site_no and "site_no" in monthly.columns:
+        monthly = monthly.loc[monthly["site_no"].astype(str).eq(str(site_no))]
+    if item_id:
+        monthly_item_column = "item_id" if "item_id" in monthly.columns else "gds_no" if "gds_no" in monthly.columns else None
+        if not monthly_item_column:
+            raise HTTPException(status_code=422, detail="Historical monthly sales file has no item_id column")
+        monthly = monthly.loc[monthly[monthly_item_column].astype(str).eq(str(item_id))]
+    actual = monthly.groupby("month", as_index=False).agg(actual_qty=("total_qty", "sum")).sort_values("month")
+
+    artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    selected_model = model_id or run["model_ids"][0]
+    predictions = read_result_rows(run["prediction_dir"], kind="predictions", model_id=selected_model, site_no=site_no)
+    if item_id:
+        predictions = predictions.loc[predictions["item_id"].astype(str).eq(str(item_id))]
+    pred_total = int(predictions["pred_qty_int"].sum()) if not predictions.empty else 0
+    target_month = None
+    if artifact.get("observation_month"):
+        target_month = str(pd.Period(artifact["observation_month"], freq="M") + 1)
+    items = [
+        {"month": str(row["month"]), "actual_qty": int(row["actual_qty"]), "pred_qty": None, "is_prediction": False}
+        for row in actual.where(actual.notna(), None).to_dict(orient="records")
+    ]
+    if target_month:
+        items.append({"month": target_month, "actual_qty": None, "pred_qty": pred_total, "is_prediction": True})
+    return {"prediction_run_id": run_id, "model_id": selected_model, "site_no": site_no, "item_id": item_id, "items": items}
+
+
+@router.get("/{run_id}/difficult-books")
+def get_difficult_books(
+    run_id: str,
+    model_id: str | None = None,
+    site_no: str | None = None,
+    difficulty_level: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=1000),
+) -> dict:
+    run = _completed_run(run_id)
+    artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    rows = build_difficult_books(
+        run["prediction_dir"],
+        observation_month=artifact.get("observation_month"),
+        model_id=model_id,
+        site_no=site_no,
+        difficulty_level=difficulty_level,
+    )
+    return page_difficult_books(rows, page=page, page_size=page_size)
+
+
+@router.get("/{run_id}/difficult-books/summary")
+def get_difficult_books_summary(
+    run_id: str,
+    model_id: str | None = None,
+    site_no: str | None = None,
+    difficulty_level: str | None = None,
+) -> dict:
+    run = _completed_run(run_id)
+    artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    rows = build_difficult_books(
+        run["prediction_dir"],
+        observation_month=artifact.get("observation_month"),
+        model_id=model_id,
+        site_no=site_no,
+        difficulty_level=difficulty_level,
+    )
+    all_rows = read_result_rows(run["prediction_dir"], kind="predictions", model_id=model_id, site_no=site_no)
+    return difficult_books_summary(rows, total_prediction_rows=len(all_rows))
+
+
+@router.get("/{run_id}/difficult-books/export")
+def export_difficult_books_excel(
+    run_id: str,
+    model_id: str | None = None,
+    site_no: str | None = None,
+    difficulty_level: str | None = None,
+):
+    run = _completed_run(run_id)
+    artifact = json.loads((Path(run["prediction_dir"]) / "summary.json").read_text(encoding="utf-8"))
+    rows = build_difficult_books(
+        run["prediction_dir"],
+        observation_month=artifact.get("observation_month"),
+        model_id=model_id,
+        site_no=site_no,
+        difficulty_level=difficulty_level,
+    )
+    if rows.empty:
+        raise HTTPException(status_code=404, detail="No difficult books found for the selected filters")
+    path = export_difficult_books(run_id, rows)
+    return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=path.name)
 
 
 @router.get("/{run_id}/export-excel")
