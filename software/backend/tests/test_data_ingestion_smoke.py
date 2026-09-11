@@ -29,11 +29,16 @@ def test_upload_processes_csv_and_registers_dataset(monkeypatch, tmp_path: Path)
     assert upload.status_code == 201
     upload_id = upload.json()["upload_id"]
     assert upload.json()["file_size_bytes"] == len(csv_body.encode("utf-8"))
+    assert upload.json()["detected_date_start"] == "2026-01-01"
+    assert upload.json()["detected_date_end"] == "2026-03-01"
+    assert upload.json()["detected_year_months"] == ["2026-01", "2026-02", "2026-03"]
+    assert upload.json()["schema_status"] == "READY"
     assert upload.json()["field_mapping"]["site_no"] == "门店编码"
     assert client.get(f"/api/jobs/{upload.json()['job_id']}").json()["status"] == "SUCCESS"
 
     uploads_before_processing = client.get("/api/uploads").json()["items"]
     assert uploads_before_processing[0]["upload_id"] == upload_id
+    assert uploads_before_processing[0]["detected_year_months"] == ["2026-01", "2026-02", "2026-03"]
     assert uploads_before_processing[0]["processing_status"] == "未处理"
     assert uploads_before_processing[0]["related_dataset"] is None
 
