@@ -8,6 +8,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
 from fastapi import UploadFile
 
 from .field_mapping_service import mapping_status
@@ -28,6 +29,9 @@ class UploadService:
                 conn.execute("ALTER TABLE uploads ADD COLUMN file_size_bytes INTEGER")
             if "job_id" not in columns:
                 conn.execute("ALTER TABLE uploads ADD COLUMN job_id TEXT")
+            for name in ("detected_date_start", "detected_date_end", "detected_year_months", "schema_status"):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE uploads ADD COLUMN {name} TEXT")
 
     async def save(self, upload: UploadFile) -> dict:
         filename = Path(upload.filename or "upload").name
@@ -46,18 +50,26 @@ class UploadService:
             csv_files = self._csv_files(upload_id, destination)
             headers = read_csv_headers(csv_files[0])
             mapping = detect_field_mapping(headers)
+            detected = self._detect_date_range(csv_files, mapping)
             record = {"upload_id": upload_id, "filename": filename, "stored_path": str(destination),
                       "csv_files": [str(path) for path in csv_files], "headers": headers, "field_mapping": mapping,
                       "mapping_status": mapping_status(mapping), "created_at": datetime.now(UTC).isoformat(),
-                      "file_size_bytes": file_size, "job_id": job["job_id"]}
+                      "file_size_bytes": file_size, "job_id": job["job_id"],
+                      "detected_date_start": detected["detected_date_start"],
+                      "detected_date_end": detected["detected_date_end"],
+                      "detected_year_months": detected["detected_year_months"],
+                      "schema_status": mapping_status(mapping)}
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""INSERT INTO uploads (
                     upload_id, filename, stored_path, csv_files, headers, field_mapping, mapping_status,
-                    created_at, file_size_bytes, job_id
-                ) VALUES (?,?,?,?,?,?,?,?,?,?)""", (
+                    created_at, file_size_bytes, job_id, detected_date_start, detected_date_end,
+                    detected_year_months, schema_status
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                     record["upload_id"], record["filename"], record["stored_path"], json.dumps(record["csv_files"]),
                     json.dumps(record["headers"]), json.dumps(record["field_mapping"]), record["mapping_status"],
                     record["created_at"], record["file_size_bytes"], record["job_id"],
+                    record["detected_date_start"], record["detected_date_end"],
+                    json.dumps(record["detected_year_months"]), record["schema_status"],
                 ))
             jobs.update(job["job_id"], status="SUCCESS", progress=100, output_files=record["csv_files"])
             jobs.log(job["job_id"], f"stored upload {destination}")
@@ -87,15 +99,48 @@ class UploadService:
             raise ValueError("ZIP does not contain a CSV file")
         return files
 
+    def _detect_date_range(self, csv_files: list[Path], mapping: dict[str, str | None]) -> dict:
+        date_column = mapping.get("sale_date")
+        if not date_column:
+            return {"detected_date_start": None, "detected_date_end": None, "detected_year_months": []}
+        values = []
+        for path in csv_files:
+            for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+                try:
+                    column = pd.read_csv(path, encoding=encoding, usecols=[date_column])[date_column]
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                raise ValueError(f"Cannot decode CSV: {path.name}")
+            dates = pd.to_datetime(column, errors="coerce").dropna()
+            if not dates.empty:
+                values.append(dates)
+        if not values:
+            return {"detected_date_start": None, "detected_date_end": None, "detected_year_months": []}
+        combined = pd.concat(values, ignore_index=True)
+        months = sorted(combined.dt.strftime("%Y-%m").unique().tolist())
+        return {
+            "detected_date_start": combined.min().strftime("%Y-%m-%d"),
+            "detected_date_end": combined.max().strftime("%Y-%m-%d"),
+            "detected_year_months": months,
+        }
+
     def get(self, upload_id: str) -> dict:
         with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute("SELECT * FROM uploads WHERE upload_id=?", (upload_id,)).fetchone()
+            row = conn.execute(
+                """SELECT upload_id, filename, stored_path, csv_files, headers, field_mapping,
+                mapping_status, created_at, file_size_bytes, job_id, detected_date_start,
+                detected_date_end, detected_year_months, schema_status
+                FROM uploads WHERE upload_id=?""",
+                (upload_id,),
+            ).fetchone()
         if row is None:
             raise KeyError(upload_id)
-        keys = ("upload_id", "filename", "stored_path", "csv_files", "headers", "field_mapping", "mapping_status", "created_at", "file_size_bytes", "job_id")
+        keys = ("upload_id", "filename", "stored_path", "csv_files", "headers", "field_mapping", "mapping_status", "created_at", "file_size_bytes", "job_id", "detected_date_start", "detected_date_end", "detected_year_months", "schema_status")
         record = dict(zip(keys, row, strict=True))
-        for key in ("csv_files", "headers", "field_mapping"):
-            record[key] = json.loads(record[key])
+        for key in ("csv_files", "headers", "field_mapping", "detected_year_months"):
+            record[key] = json.loads(record[key]) if record[key] else ([] if key == "detected_year_months" else None)
         return record
 
     def list(self) -> list[dict]:
