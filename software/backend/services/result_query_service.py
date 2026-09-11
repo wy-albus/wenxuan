@@ -19,6 +19,8 @@ def read_result_rows(
     model_id: str | None = None,
     site_no: str | None = None,
     mc: str | None = None,
+    sort_by: str = "pred_qty_int",
+    sort_order: str = "desc",
 ) -> pd.DataFrame:
     if kind not in RESULT_FILES:
         raise ValueError(f"Unsupported result kind: {kind}")
@@ -34,8 +36,20 @@ def read_result_rows(
             raise ValueError(f"{kind} cannot be filtered by MC")
         rows = rows.loc[rows["pred_mc"].eq(mc)]
     if "pred_qty_int" in rows.columns:
-        rows = rows.sort_values(["pred_qty_int", "pred_qty_raw"], ascending=[False, False], kind="stable")
+        rows = sort_result_rows(rows, sort_by=sort_by, sort_order=sort_order)
     return rows.reset_index(drop=True)
+
+
+def sort_result_rows(rows: pd.DataFrame, *, sort_by: str = "pred_qty_int", sort_order: str = "desc") -> pd.DataFrame:
+    allowed = {"pred_qty_int", "p_sale", "item_id"}
+    if sort_by not in allowed:
+        raise ValueError(f"Unsupported sort_by: {sort_by}")
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError(f"Unsupported sort_order: {sort_order}")
+    ascending = sort_order == "asc"
+    if sort_by == "item_id":
+        return rows.sort_values(["item_id", "pred_qty_int", "p_sale"], ascending=[ascending, False, False], kind="stable")
+    return rows.sort_values([sort_by, "p_sale", "item_id"], ascending=[ascending, False, True], kind="stable")
 
 
 def page_rows(rows: pd.DataFrame, *, page: int, page_size: int) -> dict:
