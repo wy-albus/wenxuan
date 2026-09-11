@@ -10,8 +10,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from software.backend.services.dataset_registry import DatasetRegistry
+from software.backend.services.data_requirement_service import DataNotReady
+from software.backend.services.data_requirement_service import DataRequirementService
 from software.backend.services.difficult_books_service import build_difficult_books, difficult_books_summary, export_difficult_books, page_difficult_books
 from software.backend.services.job_service import JobService
+from software.backend.services.monthly_data_service import MonthlyDataService
+from software.backend.services.model_contract_service import ModelContractService
 from software.backend.services.prediction_registry import PredictionRegistry
 from software.backend.services.prediction_service import PredictionService, target_month_for
 from software.backend.services.export_service import export_prediction_excel
@@ -23,8 +27,9 @@ router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 
 
 class PredictionRequest(BaseModel):
-    dataset_id: str
+    dataset_id: str | None = None
     model_ids: list[str] = Field(min_length=1)
+    target_month: str | None = Field(None, pattern=r"^\d{4}-\d{2}$")
     observation_month: str | None = None
     store_ids: list[str] | None = None
 
@@ -38,27 +43,64 @@ class PredictionNotificationRequest(BaseModel):
     mc: str | None = Field(None, pattern="^MC[0-4]$")
 
 
+class ReadinessRequest(BaseModel):
+    target_month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    model_ids: list[str] = Field(min_length=1)
+
+
+@router.post("/readiness")
+def check_prediction_readiness(request: ReadinessRequest) -> dict:
+    monthly, lineage = MonthlyDataService().read_standard_history()
+    contracts = ModelContractService().get_contracts(request.model_ids)
+    try:
+        readiness = DataRequirementService().check(monthly, target_month=request.target_month, contracts=contracts)
+        return {**readiness, "lineage": lineage}
+    except DataNotReady as exc:
+        return {"status": "NOT_READY", **exc.as_dict(), "lineage": lineage, "contracts": [contract.as_dict() for contract in contracts]}
+
+
 @router.post("", status_code=201)
 def create_prediction(request: PredictionRequest) -> dict:
-    try:
-        dataset = DatasetRegistry().get(request.dataset_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Dataset not found") from exc
     run_id = uuid.uuid4().hex
     jobs = JobService()
-    job = jobs.create("PREDICTION", [dataset["feature_parquet_path"]])
+    if request.target_month:
+        job = jobs.create("PREDICTION", [f"standard-history:{request.target_month}"])
+    else:
+        if not request.dataset_id:
+            raise HTTPException(status_code=422, detail="dataset_id is required when target_month is not provided")
+        try:
+            dataset = DatasetRegistry().get(request.dataset_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Dataset not found") from exc
+        job = jobs.create("PREDICTION", [dataset["feature_parquet_path"]])
     registry = PredictionRegistry()
-    registry.create({"prediction_run_id": run_id, "dataset_id": request.dataset_id, "model_ids": request.model_ids,
+    registry.create({"prediction_run_id": run_id, "dataset_id": request.dataset_id or "standard-history", "model_ids": request.model_ids,
                      "observation_month": request.observation_month, "store_ids": request.store_ids, "job_id": job["job_id"]})
     jobs.update(job["job_id"], status="RUNNING", progress=5)
     jobs.log(job["job_id"], f"starting prediction run {run_id}")
     registry.update(run_id, status="RUNNING")
     try:
-        result = PredictionService().run(dataset=dataset, model_ids=request.model_ids, observation_month=request.observation_month,
-                                         store_ids=request.store_ids, prediction_run_id=run_id, job_service=jobs, job_id=job["job_id"])
+        if request.target_month:
+            result = PredictionService().run_future(model_ids=request.model_ids, target_month=request.target_month,
+                                                    prediction_run_id=run_id, job_service=jobs, job_id=job["job_id"])
+        else:
+            result = PredictionService().run(dataset=dataset, model_ids=request.model_ids, observation_month=request.observation_month,
+                                             store_ids=request.store_ids, prediction_run_id=run_id, job_service=jobs, job_id=job["job_id"])
         registry.update(run_id, status="SUCCESS", prediction_dir=result["prediction_dir"])
+        registry.update_provenance(
+            run_id,
+            target_month=result.get("target_month"),
+            data_cutoff_month=result.get("data_cutoff_month") or result.get("observation_month"),
+            inference_feature_path=result.get("inference_feature_path"),
+            provenance=result.get("provenance"),
+        )
         jobs.update(job["job_id"], status="SUCCESS", progress=100, output_files=result["output_files"])
         return {"prediction_run_id": run_id, "job_id": job["job_id"], "status": "SUCCESS"}
+    except DataNotReady as exc:
+        registry.update(run_id, status="FAILED", error_message=str(exc))
+        jobs.update(job["job_id"], status="FAILED", progress=100, error_message=str(exc))
+        jobs.log(job["job_id"], f"ERROR {exc}")
+        raise HTTPException(status_code=409, detail=exc.as_dict()) from exc
     except Exception as exc:
         registry.update(run_id, status="FAILED", error_message=str(exc))
         jobs.update(job["job_id"], status="FAILED", progress=100, error_message=str(exc))
@@ -182,11 +224,14 @@ def get_historical_series(
     item_id: str | None = None,
 ) -> dict:
     run = _completed_run(run_id)
-    dataset = DatasetRegistry().get(run["dataset_id"])
-    monthly_path = Path(dataset["monthly_parquet_path"])
-    if not monthly_path.is_file():
-        raise HTTPException(status_code=404, detail="Historical monthly sales file not found")
-    monthly = pd.read_parquet(monthly_path)
+    if run["dataset_id"] == "standard-history":
+        monthly, _ = MonthlyDataService().read_standard_history()
+    else:
+        dataset = DatasetRegistry().get(run["dataset_id"])
+        monthly_path = Path(dataset["monthly_parquet_path"])
+        if not monthly_path.is_file():
+            raise HTTPException(status_code=404, detail="Historical monthly sales file not found")
+        monthly = pd.read_parquet(monthly_path)
     if "total_qty" not in monthly.columns:
         raise HTTPException(status_code=422, detail="Historical monthly sales file has no total_qty column")
     if site_no and "site_no" in monthly.columns:
