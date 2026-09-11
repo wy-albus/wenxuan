@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiBaseUrl, difficultBooksExportUrl, getDifficultBooks, getDifficultBooksSummary, getHealth, getPredictionResults, getPredictionSummary, getUploads, predictionExcelUrl, processDataset, sendTestEmail, uploadFileWithProgress } from './api';
+import { apiBaseUrl, checkPredictionReadiness, createPrediction, difficultBooksExportUrl, getDataMonths, getDifficultBooks, getDifficultBooksSummary, getHealth, getPredictionResults, getPredictionSummary, getUploads, predictionExcelUrl, processDataset, sendTestEmail, uploadFileWithProgress } from './api';
 
 describe('API client', () => {
   it('uses VITE_API_BASE_URL for health requests', async () => {
@@ -56,6 +56,26 @@ describe('API client', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://localhost:9123/api/datasets/process', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ upload_id: 'upload-1', dataset_name: '文轩销售主数据', process_mode: 'append', target_dataset_id: 'dataset-1' }),
+    }));
+  });
+
+  it('uses standard history endpoints for future prediction flow', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:9123');
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ status: 'READY', items: [] }))));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getDataMonths();
+    await checkPredictionReadiness({ target_month: '2026-07', model_ids: ['E0', 'E2', 'E3'] });
+    await createPrediction({ target_month: '2026-07', model_ids: ['E2'] });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'http://localhost:9123/api/datasets/months', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://localhost:9123/api/predictions/readiness', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ target_month: '2026-07', model_ids: ['E0', 'E2', 'E3'] }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, 'http://localhost:9123/api/predictions', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ target_month: '2026-07', model_ids: ['E2'] }),
     }));
   });
 
