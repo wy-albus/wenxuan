@@ -8,6 +8,11 @@ from software.backend.services.upload_service import UploadService
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
 
+@router.get("")
+def list_uploads() -> dict:
+    return {"items": UploadService().list()}
+
+
 @router.post("", status_code=201)
 async def upload_file(file: UploadFile = File(...)) -> dict:
     try:
