@@ -23,6 +23,11 @@ class UploadService:
             conn.execute("""CREATE TABLE IF NOT EXISTS uploads (
                 upload_id TEXT PRIMARY KEY, filename TEXT, stored_path TEXT, csv_files TEXT,
                 headers TEXT, field_mapping TEXT, mapping_status TEXT, created_at TEXT)""")
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(uploads)").fetchall()}
+            if "file_size_bytes" not in columns:
+                conn.execute("ALTER TABLE uploads ADD COLUMN file_size_bytes INTEGER")
+            if "job_id" not in columns:
+                conn.execute("ALTER TABLE uploads ADD COLUMN job_id TEXT")
 
     async def save(self, upload: UploadFile) -> dict:
         filename = Path(upload.filename or "upload").name
@@ -37,16 +42,22 @@ class UploadService:
         try:
             with destination.open("wb") as handle:
                 shutil.copyfileobj(upload.file, handle)
+            file_size = destination.stat().st_size
             csv_files = self._csv_files(upload_id, destination)
             headers = read_csv_headers(csv_files[0])
             mapping = detect_field_mapping(headers)
             record = {"upload_id": upload_id, "filename": filename, "stored_path": str(destination),
                       "csv_files": [str(path) for path in csv_files], "headers": headers, "field_mapping": mapping,
-                      "mapping_status": mapping_status(mapping), "created_at": datetime.now(UTC).isoformat(), "job_id": job["job_id"]}
+                      "mapping_status": mapping_status(mapping), "created_at": datetime.now(UTC).isoformat(),
+                      "file_size_bytes": file_size, "job_id": job["job_id"]}
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("INSERT INTO uploads VALUES (?,?,?,?,?,?,?,?)", (
+                conn.execute("""INSERT INTO uploads (
+                    upload_id, filename, stored_path, csv_files, headers, field_mapping, mapping_status,
+                    created_at, file_size_bytes, job_id
+                ) VALUES (?,?,?,?,?,?,?,?,?,?)""", (
                     record["upload_id"], record["filename"], record["stored_path"], json.dumps(record["csv_files"]),
-                    json.dumps(record["headers"]), json.dumps(record["field_mapping"]), record["mapping_status"], record["created_at"],
+                    json.dumps(record["headers"]), json.dumps(record["field_mapping"]), record["mapping_status"],
+                    record["created_at"], record["file_size_bytes"], record["job_id"],
                 ))
             jobs.update(job["job_id"], status="SUCCESS", progress=100, output_files=record["csv_files"])
             jobs.log(job["job_id"], f"stored upload {destination}")
@@ -81,8 +92,25 @@ class UploadService:
             row = conn.execute("SELECT * FROM uploads WHERE upload_id=?", (upload_id,)).fetchone()
         if row is None:
             raise KeyError(upload_id)
-        keys = ("upload_id", "filename", "stored_path", "csv_files", "headers", "field_mapping", "mapping_status", "created_at")
+        keys = ("upload_id", "filename", "stored_path", "csv_files", "headers", "field_mapping", "mapping_status", "created_at", "file_size_bytes", "job_id")
         record = dict(zip(keys, row, strict=True))
         for key in ("csv_files", "headers", "field_mapping"):
             record[key] = json.loads(record[key])
         return record
+
+    def list(self) -> list[dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            ids = [row[0] for row in conn.execute("SELECT upload_id FROM uploads ORDER BY rowid DESC")]
+            has_datasets = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='datasets'").fetchone()
+            dataset_rows = conn.execute("SELECT dataset_id, dataset_name, source_files FROM datasets ORDER BY rowid DESC").fetchall() if has_datasets else []
+        datasets = []
+        for dataset_id, dataset_name, source_files in dataset_rows:
+            datasets.append({"dataset_id": dataset_id, "dataset_name": dataset_name, "source_files": set(json.loads(source_files))})
+        records = []
+        for upload_id in ids:
+            record = self.get(upload_id)
+            related = next((dataset for dataset in datasets if set(record["csv_files"]).intersection(dataset["source_files"])), None)
+            record["processing_status"] = "已处理" if related else "未处理"
+            record["related_dataset"] = {"dataset_id": related["dataset_id"], "dataset_name": related["dataset_name"]} if related else None
+            records.append(record)
+        return records
