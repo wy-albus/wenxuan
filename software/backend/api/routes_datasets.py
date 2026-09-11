@@ -15,6 +15,8 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 class ProcessRequest(BaseModel):
     upload_id: str
     dataset_name: str
+    process_mode: str = "create"
+    target_dataset_id: str | None = None
 
 
 @router.post("/process", status_code=201)
