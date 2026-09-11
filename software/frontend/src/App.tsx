@@ -4,7 +4,7 @@ import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Drawer, Emp
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import * as echarts from 'echarts';
 import type { EChartsOption } from 'echarts';
-import { createPrediction, Dataset, DifficultBooksPage, DifficultBooksSummary, difficultBooksExportUrl, getDatasets, getDifficultBooks, getDifficultBooksSummary, getHealth, getHistoricalSeries, getJobs, getNotificationSettings, getNotifications, getPredictionResults, getPredictions, getPredictionSummary, getSmtpStatus, getStorePredictionSummary, getUploads, HistoricalSeries, Job, NotificationRecord, NotificationSettings, PagedResults, PredictionRun, PredictionSummary, predictionExcelUrl, processDataset, saveNotificationSettings, sendPredictionNotification, sendTestEmail, SmtpStatus, uploadFileWithProgress, UploadProgress, UploadRecord, UploadResult } from './lib/api';
+import { checkPredictionReadiness, createPrediction, DataMonthCatalog, Dataset, DifficultBooksPage, DifficultBooksSummary, difficultBooksExportUrl, getDataMonths, getDatasets, getDifficultBooks, getDifficultBooksSummary, getHealth, getHistoricalSeries, getJobs, getNotificationSettings, getNotifications, getPredictionResults, getPredictions, getPredictionSummary, getSmtpStatus, getStorePredictionSummary, getUploads, HistoricalSeries, Job, NotificationRecord, NotificationSettings, PagedResults, PredictionReadiness, PredictionRun, PredictionSummary, predictionExcelUrl, processDataset, saveNotificationSettings, sendPredictionNotification, sendTestEmail, SmtpStatus, uploadFileWithProgress, UploadProgress, UploadRecord, UploadResult } from './lib/api';
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -177,7 +177,7 @@ function StorePanel({ run, modelId }: { run?: PredictionRun; modelId?: string })
   return <Card title="重点门店">{rows.length ? <Table size="small" rowKey={row => `${row.site_no}-${row.model_id}`} pagination={false} dataSource={rows} columns={[{ title: '门店编号', dataIndex: 'site_no' }, { title: '预计总销量', dataIndex: 'pred_total' }, { title: '预计动销图书', dataIndex: 'pred_nonzero_count' }, { title: '高动销图书', dataIndex: 'pred_20_plus_count' }]} /> : <Empty description="暂无门店汇总数据" />}</Card>;
 }
 
-function DataAccessPage({ datasets, refresh }: { datasets: Dataset[]; refresh: () => Promise<void> }) {
+function LegacyDataAccessPage({ datasets, refresh }: { datasets: Dataset[]; refresh: () => Promise<void> }) {
   const { data: uploads, state } = useCachedData<{ items: UploadRecord[] }>('uploads', getUploads, []);
   const [upload, setUpload] = useState<UploadResult>(); const [progress, setProgress] = useState<UploadProgress>(); const [uploadState, setUploadState] = useState<'待上传' | '上传中' | '上传完成' | '数据处理中' | '处理完成' | '失败'>('待上传'); const [file, setFile] = useState<File>(); const [form] = Form.useForm(); const [busy, setBusy] = useState(false); const [mode, setMode] = useState<'append' | 'create'>(datasets.length ? 'append' : 'create');
   const customRequest = ({ file: selectedFile, onSuccess, onError }: any) => {
@@ -191,11 +191,65 @@ function DataAccessPage({ datasets, refresh }: { datasets: Dataset[]; refresh: (
   return <><PageHead title="数据接入" actions={<Tag color="blue">支持 CSV / ZIP</Tag>} /><Row gutter={[16, 16]}><Col span={10}><Card title="新数据上传"><Upload.Dragger accept=".csv,.zip" maxCount={1} customRequest={customRequest}><p>点击或拖拽上传 CSV / ZIP</p><p className="muted">离开页面后不恢复浏览器文件框，但上传记录会持久显示。</p></Upload.Dragger><div className="upload-status"><Text strong>{file?.name ?? '尚未选择文件'}</Text><Text type="secondary">{fileSize(file?.size)}</Text>{statusTag(uploadState === '失败' ? 'FAILED' : uploadState === '处理完成' || uploadState === '上传完成' ? 'SUCCESS' : uploadState === '待上传' ? 'QUEUED' : 'RUNNING')}<Progress percent={progress?.percent} status={uploadState === '失败' ? 'exception' : undefined} showInfo={progress?.computable} /></div>{upload && <Form form={form} layout="vertical" className="inline-form"><Form.Item label="处理方式"><Radio.Group value={mode} onChange={e => setMode(e.target.value)}><Radio value="append" disabled={!datasets.length}>追加到已有数据集（推荐）</Radio><Radio value="create">创建新数据集</Radio></Radio.Group></Form.Item>{mode === 'append' ? <Form.Item name="target_dataset_id" label="选择逻辑数据集" rules={[{ required: true, message: '请选择要追加的数据集' }]}><Select options={datasets.map(d => ({ value: d.dataset_id, label: `${d.dataset_name}（${d.date_range.start} 至 ${d.date_range.end}）` }))} /></Form.Item> : <Form.Item name="name" label="新数据集名称" rules={[{ required: true, message: '请输入数据集名称' }]}><Input placeholder="例如：文轩销售主数据" /></Form.Item>}<Button type="primary" loading={busy} disabled={upload.mapping_status !== 'READY'} onClick={() => void process()}>开始处理</Button></Form>}</Card></Col><Col span={14}><Card title="上传记录">{state === 'loading' ? <Spin /> : <Table rowKey="upload_id" dataSource={uploads?.items ?? []} locale={{ emptyText: '暂无上传记录' }} columns={[{ title: '文件名', dataIndex: 'filename' }, { title: '文件大小', dataIndex: 'file_size_bytes', render: fileSize }, { title: '上传时间', dataIndex: 'created_at', render: displayTime }, { title: '上传状态', render: () => statusTag('SUCCESS') }, { title: '处理状态', dataIndex: 'processing_status' }, { title: '关联数据集', render: (_, r: UploadRecord) => r.related_dataset?.dataset_name ?? '未关联' }]} expandable={{ expandedRowRender: r => <Descriptions size="small" column={1}><Descriptions.Item label="上传 ID">{r.upload_id}</Descriptions.Item><Descriptions.Item label="存储路径">{r.stored_path}</Descriptions.Item><Descriptions.Item label="CSV 文件">{r.csv_files.join('；')}</Descriptions.Item></Descriptions> }} />}</Card></Col></Row><Card className="table-card" title="数据集列表"><Table rowKey="dataset_id" dataSource={datasets} columns={[{ title: '逻辑数据集', dataIndex: 'dataset_name' }, { title: '覆盖区间', render: (_, r: Dataset) => `${r.date_range.start} 至 ${r.date_range.end}` }, { title: '门店数', dataIndex: 'store_count' }, { title: '图书数', dataIndex: 'item_count' }, { title: '特征状态', render: (_, r: Dataset) => <Space>{r.has_active_store && <Tag>Active-Store</Tag>}{r.has_cross_store_features && <Tag>跨门店特征</Tag>}{r.has_diff_features && <Tag>差分特征</Tag>}</Space> }, { title: '数据状态', dataIndex: 'status', render: statusTag }]} /></Card></>;
 }
 
-function PredictionPage({ datasets, refresh, onNavigate }: { datasets: Dataset[]; refresh: () => Promise<void>; onNavigate: (view: View) => void }) {
+function DataAccessPage({ datasets, refresh }: { datasets: Dataset[]; refresh: () => Promise<void> }) {
+  return <><LegacyDataAccessPage datasets={datasets} refresh={refresh} /><DataMonthBrowser /></>;
+}
+
+function DataMonthBrowser() {
+  const { data, state } = useCachedData<DataMonthCatalog>('data-months', getDataMonths, []);
+  const years = useMemo(() => {
+    const grouped = new Map<string, DataMonthCatalog['items']>();
+    for (const item of data?.items ?? []) grouped.set(item.year, [...(grouped.get(item.year) ?? []), item]);
+    return Array.from(grouped.entries()).sort(([a], [b]) => b.localeCompare(a));
+  }, [data]);
+  return <Card className="table-card" title="标准历史数据">{state === 'loading' ? <Spin /> : <><Descriptions size="small" column={4}><Descriptions.Item label="当前覆盖">{data?.summary.date_range ? `${data.summary.date_range.start} 至 ${data.summary.date_range.end}` : '暂无'}</Descriptions.Item><Descriptions.Item label="月份数">{formatNumber(data?.summary.month_count)}</Descriptions.Item><Descriptions.Item label="门店数">{formatNumber(data?.summary.store_count)}</Descriptions.Item><Descriptions.Item label="图书数">{formatNumber(data?.summary.item_count)}</Descriptions.Item></Descriptions><Collapse items={years.map(([year, items]) => ({ key: year, label: year, children: <Table rowKey="month" pagination={false} dataSource={items} columns={[{ title: '月份', dataIndex: 'month' }, { title: '状态', dataIndex: 'status', render: statusTag }, { title: '覆盖门店', dataIndex: 'store_count' }, { title: '覆盖图书', dataIndex: 'item_count' }, { title: '月度行数', dataIndex: 'row_count' }, { title: '来源数据集', render: (_, row) => row.source_dataset_ids.join('、') || '暂无' }]} /> }))} /></>}</Card>;
+}
+
+function LegacyPredictionPage({ datasets, refresh, onNavigate }: { datasets: Dataset[]; refresh: () => Promise<void>; onNavigate: (view: View) => void }) {
   const [form] = Form.useForm(); const [busy, setBusy] = useState(false); const [selectedDatasetId, setSelectedDatasetId] = useState<string>(); const ready = datasets.filter(d => d.status === 'READY'); const selected = ready.find(d => d.dataset_id === selectedDatasetId) ?? ready[0]; const observation = selected?.date_range.end; const target = nextMonth(observation);
   useEffect(() => { if (ready[0] && !selectedDatasetId) setSelectedDatasetId(ready[0].dataset_id); }, [ready, selectedDatasetId]);
   const submit = async () => { if (!selected) return; const values = await form.validateFields(); setBusy(true); try { await createPrediction({ dataset_id: selected.dataset_id, model_ids: values.model_ids, observation_month: observation }); await refresh(); message.success('预测完成，已生成结果。'); onNavigate('analysis'); } catch (error) { message.error(String(error)); } finally { setBusy(false); } };
   return <><PageHead title="销量预测" actions={<Tag color="green">推荐模型：跨门店增强 Two-stage（E2）</Tag>} /><Card>{ready.length ? <Form form={form} layout="vertical" initialValues={{ model_ids: ['E2'] }}><Form.Item label="选择逻辑数据集"><Select value={selected?.dataset_id} onChange={setSelectedDatasetId} options={ready.map(d => ({ value: d.dataset_id, label: `${d.dataset_name}（${d.date_range.start} 至 ${d.date_range.end}）` }))} /></Form.Item>{selected && <Card size="small" className="source-card"><Descriptions size="small" column={2}><Descriptions.Item label="当前数据">{selected.dataset_name}</Descriptions.Item><Descriptions.Item label="覆盖区间">{selected.date_range.start} 至 {selected.date_range.end}</Descriptions.Item><Descriptions.Item label="数据截止月份">{observation}</Descriptions.Item><Descriptions.Item label="预测目标月份">{target}</Descriptions.Item></Descriptions></Card>}<Form.Item name="model_ids" label="选择模型" rules={[{ required: true, message: '请选择模型' }]}><Checkbox.Group options={[...runnableModels.map(id => ({ value: id, label: modelNames[id] })), { value: 'RF', label: '随机森林（暂未接入当前推理）', disabled: true }, { value: 'LGBM', label: 'LightGBM（历史实验模型）', disabled: true }, { value: 'MLP', label: 'MLP（历史实验模型）', disabled: true }]} /></Form.Item>{busy && <Alert type="info" showIcon message="预测运行中" description="后端正在执行真实预测任务；当前接口返回单一进度值，不展示伪造分阶段完成度。" />}<Button className="action-row" type="primary" loading={busy} onClick={() => void submit()}>开始预测</Button></Form> : <Empty description="暂无就绪数据集，请先完成数据接入。" />}</Card></>;
+}
+
+function PredictionPage({ refresh, onNavigate }: { datasets: Dataset[]; refresh: () => Promise<void>; onNavigate: (view: View) => void }) {
+  const [form] = Form.useForm();
+  const [busy, setBusy] = useState(false);
+  const [readiness, setReadiness] = useState<PredictionReadiness>();
+  const { data: months } = useCachedData<DataMonthCatalog>('data-months', getDataMonths, []);
+  const latestMonth = months?.summary.date_range?.end;
+  const defaultTarget = nextMonth(latestMonth);
+  const values = Form.useWatch([], form);
+  useEffect(() => {
+    if (!form.getFieldValue('target_month') && latestMonth) form.setFieldValue('target_month', defaultTarget);
+  }, [defaultTarget, form, latestMonth]);
+  useEffect(() => {
+    const target = values?.target_month || defaultTarget;
+    const modelIds = values?.model_ids || ['E2'];
+    if (!target || !modelIds.length || target === '暂无') return;
+    checkPredictionReadiness({ target_month: target, model_ids: modelIds }).then(setReadiness).catch(error => setReadiness({ status: 'NOT_READY', target_month: target, observation_month: nextMonth(undefined), detail: String(error) }));
+  }, [defaultTarget, values?.target_month, JSON.stringify(values?.model_ids ?? ['E2'])]);
+  const submit = async () => {
+    const formValues = await form.validateFields();
+    setBusy(true);
+    try {
+      const checked = await checkPredictionReadiness({ target_month: formValues.target_month, model_ids: formValues.model_ids });
+      setReadiness(checked);
+      if (checked.status !== 'READY') {
+        message.error('数据准备未完成，不能发起预测。');
+        return;
+      }
+      await createPrediction({ target_month: formValues.target_month, model_ids: formValues.model_ids });
+      await refresh();
+      message.success('预测完成，已生成未来月份结果。');
+      onNavigate('analysis');
+    } catch (error) {
+      message.error(String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <><PageHead title="销量预测" actions={<Tag color="green">目标月份驱动</Tag>} /><Card><Form form={form} layout="vertical" initialValues={{ target_month: defaultTarget, model_ids: ['E2'] }}><Form.Item name="target_month" label="预测目标月份" rules={[{ required: true, message: '请输入预测目标月份' }]}><Input placeholder="例如：2026-07" /></Form.Item><Form.Item name="model_ids" label="选择模型" rules={[{ required: true, message: '请选择模型' }]}><Checkbox.Group options={[...runnableModels.map(id => ({ value: id, label: modelNames[id] })), { value: 'RF', label: '随机森林（暂未接入当前推理）', disabled: true }, { value: 'LGBM', label: 'LightGBM（历史实验模型）', disabled: true }, { value: 'MLP', label: 'MLP（历史实验模型）', disabled: true }]} /></Form.Item>{readiness && <Card size="small" className="source-card"><Descriptions size="small" column={2}><Descriptions.Item label="数据截止月份">{readiness.observation_month}</Descriptions.Item><Descriptions.Item label="预测目标月份">{readiness.target_month}</Descriptions.Item><Descriptions.Item label="检查状态">{readiness.status === 'READY' ? statusTag('SUCCESS') : statusTag('FAILED')}</Descriptions.Item><Descriptions.Item label="所需月份">{readiness.required_months?.join('、') ?? '待检查'}</Descriptions.Item></Descriptions>{readiness.status !== 'READY' && <Alert type="error" showIcon message="数据准备失败" description={`缺少历史数据：${readiness.missing_months?.join('、') || readiness.detail || '未知原因'}；影响特征：${readiness.affected_features?.slice(0, 5).join('、') || '模型输入特征'}`} />}</Card>}<Button className="action-row" type="primary" loading={busy} disabled={readiness?.status === 'NOT_READY'} onClick={() => void submit()}>开始预测</Button></Form></Card></>;
 }
 
 function AnalysisPage({ runs }: { runs: PredictionRun[] }) {
