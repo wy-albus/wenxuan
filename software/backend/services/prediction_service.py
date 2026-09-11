@@ -18,6 +18,13 @@ from .runtime import runtime_root
 
 IDENTITY_COLUMNS = ("site_no", "item_id")
 OPTIONAL_DISPLAY_COLUMNS = ("isbn", "book_name", "category")
+OPTIONAL_VALIDATION_COLUMNS = {"future_qty_1m": "actual_qty"}
+
+
+def target_month_for(observation_month: str | None) -> str | None:
+    if not observation_month:
+        return None
+    return str(pd.Period(observation_month, freq="M") + 1)
 
 
 def _prepare_model_frame(frame: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -109,6 +116,9 @@ class PredictionService:
             for column in OPTIONAL_DISPLAY_COLUMNS:
                 if column in selected.columns:
                     output[column] = selected[column].to_numpy()
+            for source_column, output_column in OPTIONAL_VALIDATION_COLUMNS.items():
+                if source_column in selected.columns:
+                    output[output_column] = selected[source_column].to_numpy()
             result_parts.append(output)
             if job_service and job_id:
                 job_service.update(job_id, status="RUNNING", progress=25 + int(index / len(model_ids) * 60))
@@ -143,7 +153,7 @@ class PredictionService:
             }
         summary = {
             "prediction_run_id": run_id, "dataset_id": dataset["dataset_id"], "observation_month": observation_month,
-            "model_ids": model_ids, "model_summaries": model_summaries,
+            "target_month": target_month_for(observation_month), "model_ids": model_ids, "model_summaries": model_summaries,
         }
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         if job_service and job_id:
