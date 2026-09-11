@@ -49,6 +49,8 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
     assert Path(run["prediction_dir"], "predictions.parquet").is_file()
     summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/summary").json()
     assert set(summary["model_summaries"]) == {"E0", "E2", "E3"}
+    assert summary["observation_month"] == "2026-03"
+    assert summary["target_month"] == "2026-04"
     filtered_summary = client.get(
         f"/api/predictions/{payload['prediction_run_id']}/summary?model_id=E2&site_no=8000&mc=MC0"
     )
@@ -63,11 +65,12 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
     assert downloaded.status_code == 200
 
     filtered = client.get(
-        f"/api/predictions/{payload['prediction_run_id']}/results?kind=predictions&model_id=E2&site_no=8000&mc=MC0&page=1&page_size=10"
+        f"/api/predictions/{payload['prediction_run_id']}/results?kind=predictions&model_id=E2&site_no=8000&mc=MC0&page=1&page_size=10&sort_by=pred_qty_int&sort_order=desc"
     )
     assert filtered.status_code == 200, filtered.text
     assert filtered.json()["total"] == 1
     assert filtered.json()["items"][0]["model_id"] == "E2"
+    assert filtered.json()["sort"] == {"sort_by": "pred_qty_int", "sort_order": "desc"}
 
     store_summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/store/8000/summary?model_id=E2")
     assert store_summary.status_code == 200, store_summary.text
@@ -80,3 +83,101 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
     workbook = load_workbook(BytesIO(exported.content), read_only=True)
     assert {"Summary", "Store_Summary", "Top_Books", "Predictions", "Model_Info"}.issubset(workbook.sheetnames)
     assert workbook["Predictions"].max_row == 2
+
+    difficult = client.get(f"/api/predictions/{payload['prediction_run_id']}/difficult-books?model_id=E2")
+    assert difficult.status_code == 200, difficult.text
+    difficult_payload = difficult.json()
+    assert difficult_payload["total"] >= 0
+
+    difficult_summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/difficult-books/summary?model_id=E2")
+    assert difficult_summary.status_code == 200, difficult_summary.text
+    assert difficult_summary.json()["difficulty_rules"]["metric"] == "stable_error"
+
+
+def test_difficult_books_endpoint_handles_actual_zero_and_exports(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WENXUAN_SOFTWARE_RUNTIME", str(tmp_path / "runtime"))
+    from software.backend.api.main import create_app
+    from software.backend.services.dataset_registry import DatasetRegistry
+    from software.backend.services.prediction_registry import PredictionRegistry
+
+    prediction_dir = tmp_path / "runtime" / "predictions" / "manual-run"
+    prediction_dir.mkdir(parents=True)
+    monthly_path = tmp_path / "monthly.parquet"
+    pd.DataFrame([
+        {"month": "2026-01", "site_no": "8000", "item_id": "BOOK-ZERO", "total_qty": 3},
+        {"month": "2026-02", "site_no": "8000", "item_id": "BOOK-ZERO", "total_qty": 5},
+    ]).to_parquet(monthly_path, index=False)
+    DatasetRegistry().register({
+        "dataset_id": "dataset-1",
+        "dataset_name": "manual-dataset",
+        "source_type": "csv",
+        "source_files": [],
+        "date_range": {"start": "2026-01", "end": "2026-02"},
+        "store_count": 1,
+        "item_count": 1,
+        "row_count": 2,
+        "monthly_parquet_path": str(monthly_path),
+        "active_store_parquet_path": str(monthly_path),
+        "feature_parquet_path": str(monthly_path),
+        "has_active_store": True,
+        "has_diff_features": True,
+        "has_cross_store_features": True,
+    })
+    pd.DataFrame([
+        {
+            "dataset_id": "dataset-1",
+            "prediction_run_id": "manual-run",
+            "model_id": "E2",
+            "site_no": "8000",
+            "item_id": "BOOK-ZERO",
+            "book_name": "Zero Actual Book",
+            "p_sale": 0.9,
+            "conditional_qty": 12.0,
+            "pred_qty_raw": 12.0,
+            "pred_qty_int": 12,
+            "pred_mc": "MC3",
+            "actual_qty": 0,
+        }
+    ]).to_parquet(prediction_dir / "predictions.parquet", index=False)
+    pd.DataFrame().to_parquet(prediction_dir / "top_books.parquet", index=False)
+    pd.DataFrame().to_parquet(prediction_dir / "store_summary.parquet", index=False)
+    (prediction_dir / "summary.json").write_text(
+        '{"prediction_run_id":"manual-run","dataset_id":"dataset-1","observation_month":"2026-03","model_ids":["E2"],"model_summaries":{}}',
+        encoding="utf-8",
+    )
+    registry = PredictionRegistry()
+    registry.create({
+        "prediction_run_id": "manual-run",
+        "dataset_id": "dataset-1",
+        "model_ids": ["E2"],
+        "observation_month": "2026-03",
+        "store_ids": None,
+        "job_id": "job-1",
+    })
+    registry.update("manual-run", status="SUCCESS", prediction_dir=str(prediction_dir))
+    client = TestClient(create_app())
+
+    difficult = client.get("/api/predictions/manual-run/difficult-books?model_id=E2&page=1&page_size=10")
+    assert difficult.status_code == 200, difficult.text
+    payload = difficult.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["actual_qty"] == 0
+    assert payload["items"][0]["stable_error"] == 12
+    assert payload["items"][0]["difficulty_level"] == "困难"
+
+    summary = client.get("/api/predictions/manual-run/difficult-books/summary?model_id=E2")
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["difficult_book_count"] == 1
+    assert summary.json()["difficulty_rules"]["note"].startswith("当前为系统工程默认筛选规则")
+
+    difficult_export = client.get("/api/predictions/manual-run/difficult-books/export?model_id=E2")
+    assert difficult_export.status_code == 200, difficult_export.text
+    assert difficult_export.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    series = client.get("/api/predictions/manual-run/historical-series?model_id=E2&site_no=8000&item_id=BOOK-ZERO")
+    assert series.status_code == 200, series.text
+    assert series.json()["items"] == [
+        {"month": "2026-01", "actual_qty": 3, "pred_qty": None, "is_prediction": False},
+        {"month": "2026-02", "actual_qty": 5, "pred_qty": None, "is_prediction": False},
+        {"month": "2026-04", "actual_qty": None, "pred_qty": 12, "is_prediction": True},
+    ]
