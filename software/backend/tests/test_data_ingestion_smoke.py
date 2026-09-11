@@ -28,12 +28,18 @@ def test_upload_processes_csv_and_registers_dataset(monkeypatch, tmp_path: Path)
     )
     assert upload.status_code == 201
     upload_id = upload.json()["upload_id"]
+    assert upload.json()["file_size_bytes"] == len(csv_body.encode("utf-8"))
     assert upload.json()["field_mapping"]["site_no"] == "门店编码"
     assert client.get(f"/api/jobs/{upload.json()['job_id']}").json()["status"] == "SUCCESS"
 
+    uploads_before_processing = client.get("/api/uploads").json()["items"]
+    assert uploads_before_processing[0]["upload_id"] == upload_id
+    assert uploads_before_processing[0]["processing_status"] == "未处理"
+    assert uploads_before_processing[0]["related_dataset"] is None
+
     processed = client.post(
         "/api/datasets/process",
-        json={"upload_id": upload_id, "dataset_name": "smoke-sales"},
+        json={"upload_id": upload_id, "dataset_name": "smoke-sales", "process_mode": "create"},
     )
     assert processed.status_code == 201, processed.text
     job = client.get(f"/api/jobs/{processed.json()['job_id']}").json()
@@ -50,3 +56,7 @@ def test_upload_processes_csv_and_registers_dataset(monkeypatch, tmp_path: Path)
     assert Path(dataset["monthly_parquet_path"]).exists()
     assert Path(dataset["active_store_parquet_path"]).exists()
     assert Path(dataset["feature_parquet_path"]).exists()
+
+    uploads_after_processing = client.get("/api/uploads").json()["items"]
+    assert uploads_after_processing[0]["processing_status"] == "已处理"
+    assert uploads_after_processing[0]["related_dataset"]["dataset_name"] == "smoke-sales"
