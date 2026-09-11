@@ -8,6 +8,38 @@ from openpyxl import load_workbook
 from fastapi.testclient import TestClient
 
 
+def _monthly_for_future_prediction(months: list[str]) -> pd.DataFrame:
+    rows = []
+    for month_index, month in enumerate(months, start=1):
+        for site_no in ("8000", "8001"):
+            for item_id in ("BOOK-1", "BOOK-2"):
+                rows.append({
+                    "month": month,
+                    "site_no": site_no,
+                    "blt_site_no": site_no,
+                    "item_id": item_id,
+                    "isbn": item_id,
+                    "gds_no": item_id,
+                    "gds_ctgry_3_lvel": "unknown",
+                    "gds_ctgry_4_lvel": "unknown",
+                    "gds_ctgry_5_lvel": "unknown",
+                    "price": 20.0,
+                    "total_qty": float(month_index),
+                    "offline_qty": float(month_index),
+                    "online_qty": 0.0,
+                    "unknown_channel_qty": 0.0,
+                    "total_tlp": 20.0 * month_index,
+                    "total_tsp": 18.0 * month_index,
+                    "avg_real_price": 18.0,
+                    "discount_rate": 0.9,
+                    "sales_days": 1,
+                    "sales_count": 1,
+                    "return_count": 0,
+                    "return_qty": 0.0,
+                })
+    return pd.DataFrame(rows)
+
+
 def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WENXUAN_SOFTWARE_RUNTIME", str(tmp_path / "runtime"))
     from src.models.lightgbm_model import load_model_bundle
@@ -92,6 +124,47 @@ def test_ready_dataset_creates_e0_e2_e3_prediction_artifacts(monkeypatch, tmp_pa
     difficult_summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/difficult-books/summary?model_id=E2")
     assert difficult_summary.status_code == 200, difficult_summary.text
     assert difficult_summary.json()["difficulty_rules"]["metric"] == "stable_error"
+
+
+def test_future_prediction_uses_standard_history_without_future_labels(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WENXUAN_SOFTWARE_RUNTIME", str(tmp_path / "runtime"))
+    from software.backend.api.main import create_app
+    from software.backend.services.dataset_registry import DatasetRegistry
+
+    monthly_path = tmp_path / "monthly.parquet"
+    _monthly_for_future_prediction(["2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]).to_parquet(monthly_path, index=False)
+    DatasetRegistry().register({
+        "dataset_name": "standard-history-smoke",
+        "source_type": "parquet",
+        "source_files": ["raw-file-1"],
+        "date_range": {"start": "2025-12", "end": "2026-06"},
+        "store_count": 2,
+        "item_count": 2,
+        "row_count": 28,
+        "monthly_parquet_path": str(monthly_path),
+        "active_store_parquet_path": str(monthly_path),
+        "feature_parquet_path": str(monthly_path),
+        "has_active_store": True,
+        "has_diff_features": True,
+        "has_cross_store_features": True,
+    })
+    client = TestClient(create_app())
+
+    created = client.post("/api/predictions", json={"target_month": "2026-07", "model_ids": ["E0", "E2", "E3"]})
+
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    summary = client.get(f"/api/predictions/{payload['prediction_run_id']}/summary").json()
+    assert summary["observation_month"] == "2026-06"
+    assert summary["target_month"] == "2026-07"
+    assert summary["provenance"]["source_months"] == ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+    run = client.get(f"/api/predictions/{payload['prediction_run_id']}").json()
+    inference_path = Path(run["inference_feature_path"])
+    assert inference_path.is_file()
+    inference_columns = set(pd.read_parquet(inference_path).columns)
+    assert "future_qty_1m" not in inference_columns
+    assert "future_qty_2m" not in inference_columns
+    assert "target_qty_1m" not in inference_columns
 
 
 def test_difficult_books_endpoint_handles_actual_zero_and_exports(monkeypatch, tmp_path: Path) -> None:
